@@ -1,5 +1,5 @@
 # QA Bot Interface with Gradio on Google Colab
-
+# Front end
 # First, let's install the required libraries
 !pip install -q transformers sentence-transformers faiss-cpu gradio PyPDF2
 
@@ -91,3 +91,46 @@ with gr.Blocks() as demo:
 
 # Launch the interface
 demo.launch(debug=True)
+# Backend
+import PyPDF2
+from transformers import pipeline
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
+
+# Load models (place outside functions)
+qa_model = pipeline("question-answering", model="distilbert-base-cased-distilled-squad")
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Function to process the PDF and generate embeddings
+def process_pdf(pdf_file):
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
+    document_text = ""
+    for page in pdf_reader.pages:
+        document_text += page.extract_text()
+
+    sentences = document_text.split('. ')  # Split into sentences
+    embeddings = embedding_model.encode(sentences)  # Generate sentence embeddings
+
+    # Create Faiss index for efficient retrieval (optional)
+    faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
+    faiss_index.add(embeddings)
+
+    return sentences, embeddings, faiss_index  # Return extracted data
+
+# Function to retrieve relevant context based on a query
+def get_relevant_context(query, sentences, faiss_index=None, k=3):
+    if faiss_index:
+        query_vector = embedding_model.encode([query])
+        _, I = faiss_index.search(query_vector, k)
+        relevant_sentences = [sentences[i] for i in I[0]]
+    else:
+        # If no Faiss index, use a simpler approach (e.g., keyword matching)
+        relevant_sentences = [s for s in sentences if query.lower() in s.lower()]
+
+    return ". ".join(relevant_sentences)
+
+# Function to answer the question using the QA model and relevant context
+def answer_question(query, context):
+    answer = qa_model(question=query, context=context)
+    return answer['answer'], context
